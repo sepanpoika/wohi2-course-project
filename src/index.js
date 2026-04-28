@@ -3,16 +3,18 @@ const app = express();
 // use the port 3000 or environment variable 
 const PORT = process.env.PORT || 3000;
 
-// STEP 10: Import the prisma client
+// import the prisma client
 const prisma = require("./lib/prisma");
 
-// import the router 
+// import the routers 
 const questionsRouter = require("./routes/questions");
+const authRouter = require("./routes/auth");
 
-// middlwaree for reading JSON data
+// middleware for reading JSON data
 app.use(express.json());
 
-// define questions to be routed to questionsRouter 
+// define routes
+app.use("/api/auth", authRouter);
 app.use("/api/questions", questionsRouter);
 
 // add "Not found" if we can't locate the route 

@@ -2,6 +2,10 @@ const express = require("express");
 const router = express.Router();
 const prisma = require("../lib/prisma"); 
 
+// import the middlewares 
+const authenticate = require("../middleware/auth");
+const isOwner = require("../middleware/isOwner");
+
 // GET /api/questions 
 // list all questions OR search by keyword from database
 router.get("/", async (req, res) => {
@@ -44,6 +48,9 @@ router.get("/:qId", async (req, res) => {
   }
 });
 
+// PROTECTED ROUTE, login required
+router.use(authenticate);
+
 // POST /api/questions
 // create a new question in the database
 router.post("/", async (req, res) => {
@@ -57,11 +64,12 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // create new question 
+    // create new question
     const newQuestion = await prisma.question.create({
       data: {
         question,
-        answer
+        answer,
+        userId: req.user.userId // get user id from token 
       }
     });
 
@@ -73,7 +81,8 @@ router.post("/", async (req, res) => {
 
 // PUT /api/questions/:qId
 // edit an existing question in the database
-router.put("/:qId", async (req, res) => {
+// isOwner checks whether you are the creator
+router.put("/:qId", isOwner, async (req, res) => {
   try {
     const qId = Number(req.params.qId);
     const { question, answer } = req.body;
@@ -104,7 +113,8 @@ router.put("/:qId", async (req, res) => {
 
 // DELETE /api/questions/:qId
 // delete a question from the database
-router.delete("/:qId", async (req, res) => {
+// isOwner checks whether you are the creator
+router.delete("/:qId", isOwner, async (req, res) => {
   try {
     const qId = Number(req.params.qId);
 
