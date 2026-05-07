@@ -1,4 +1,5 @@
 const express = require("express");
+const path = require("path");
 const app = express();
 // use the port 3000 or environment variable 
 const PORT = process.env.PORT || 3000;
@@ -12,6 +13,9 @@ const authRouter = require("./routes/auth");
 
 // middleware for reading JSON data
 app.use(express.json());
+
+// middleware for files
+app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // define routes
 app.use("/api/auth", authRouter);

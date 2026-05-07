@@ -20,6 +20,8 @@ model User {
   password  String     @db.VarChar(255)
   name      String     @db.VarChar(100)
   questions Question[]
+  likes     Like[]
+  attempts  Attempt[]
 
   @@map("users")
 }
@@ -29,10 +31,37 @@ model Question {
   id       Int    @id @default(autoincrement())
   question String @db.VarChar(255)
   answer   String @db.Text
-  
-  // new relation fields
   userId   Int
   user     User   @relation(fields: [userId], references: [id])
+  likes    Like[]
+  imageUrl String?  @db.VarChar(255)
+  attempts Attempt[]
 
   @@map("questions")
+}
+
+model Like {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  postId    Int
+  question  Question @relation(fields: [postId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, postId])
+  @@map("likes")
+}
+
+model Attempt {
+  id              Int      @id @default(autoincrement())
+  questionId      Int
+  userId          Int
+  submittedAnswer String   @db.Text
+  correct         Boolean
+  createdAt       DateTime @default(now())
+  
+  question        Question @relation(fields: [questionId], references: [id])
+  user            User     @relation(fields: [userId], references: [id])
+
+  @@map("attempts")
 }
