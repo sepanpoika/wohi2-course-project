@@ -3,6 +3,14 @@ const router = require("express").Router();
 const prisma = require("../lib/prisma"); 
 const multer = require("multer");
 const path = require("path");
+const { ValidationError, NotFoundError } = require("../lib/errors");
+const { z } = require("zod");
+
+// defining Zod
+const QuestionInput = z.object({
+  question: z.string().min(1),
+  answer: z.string().min(1)
+});
 
 // storage setup for images
 const storage = multer.diskStorage({
@@ -18,7 +26,7 @@ const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith("image/")) cb(null, true);
-    else cb(new Error("Only image files are allowed"));
+    else cb(new ValidationError("Only image files are allowed")); // using ValidationError
   },
   limits: { fileSize: 5 * 1024 * 1024 }
 });
@@ -29,7 +37,7 @@ const isOwner = require("../middleware/isOwner");
 
 // GET /api/questions 
 // list all questions OR search by keyword from database with pagination
-router.get("/", async (req, res) => {
+router.get("/", async (req, res, next) => {
   try {
     const { keyword } = req.query;
 
@@ -52,6 +60,7 @@ router.get("/", async (req, res) => {
         where,
         include: { 
           user: true,
+          // include like data in response
           likes: { where: { userId }, take: 1 },
           attempts: { where: { userId, correct: true }, take: 1 },
           _count: { select: { likes: true } }
@@ -72,13 +81,13 @@ router.get("/", async (req, res) => {
       totalPages: Math.ceil(total / limit),
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    next(error);
   }
 });
 
 // GET /api/questions/:qId
 // return specific question based on ID from database
-router.get("/:qId", async (req, res) => {
+router.get("/:qId", async (req, res, next) => {
   try {
     const qId = Number(req.params.qId);
     const userId = req.user?.userId;
@@ -95,12 +104,12 @@ router.get("/:qId", async (req, res) => {
     });
 
     if (!question) {
-      return res.status(404).json({ message: "Question not found" });
+      throw new NotFoundError("Question not found");
     }
 
     res.json(formatQuestion(question));
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    next(error);
   }
 });
 
@@ -109,14 +118,14 @@ router.use(authenticate);
 
 // POST /api/questions/:qId/like
 // like a question
-router.post("/:qId/like", async (req, res) => {
+router.post("/:qId/like", async (req, res, next) => {
   try {
     const qId = Number(req.params.qId);
     const userId = req.user.userId;
 
     const question = await prisma.question.findUnique({ where: { id: qId } });
     if (!question) {
-      return res.status(404).json({ message: "Question not found" });
+      throw new NotFoundError("Question not found");
     }
 
     const like = await prisma.like.upsert({
@@ -134,20 +143,20 @@ router.post("/:qId/like", async (req, res) => {
       createdAt: like.createdAt
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    next(error);
   }
 });
 
 // DELETE /api/questions/:qId/like
 // unlike a question
-router.delete("/:qId/like", async (req, res) => {
+router.delete("/:qId/like", async (req, res, next) => {
   try {
     const qId = Number(req.params.qId);
     const userId = req.user.userId;
 
     const question = await prisma.question.findUnique({ where: { id: qId } });
     if (!question) {
-      return res.status(404).json({ message: "Question not found" });
+      throw new NotFoundError("Question not found");
     }
 
     // deleteMany doesn't error if no like exists
@@ -158,13 +167,13 @@ router.delete("/:qId/like", async (req, res) => {
     const likeCount = await prisma.like.count({ where: { postId: qId } });
     res.json({ postId: qId, liked: false, likeCount });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    next(error);
   }
 });
 
 // POST /api/questions/:qId/play
 // submit an answer to a question and save the attempt
-router.post("/:qId/play", async (req, res) => {
+router.post("/:qId/play", async (req, res, next) => {
   try {
     const qId = Number(req.params.qId);
     const userId = req.user.userId;
@@ -173,18 +182,18 @@ router.post("/:qId/play", async (req, res) => {
     const submittedAnswer = req.body.submittedAnswer || req.body.answer;
 
     if (!submittedAnswer) {
-      return res.status(400).json({ message: "submittedAnswer is required" });
+      throw new ValidationError("submittedAnswer is required");
     }
 
     const question = await prisma.question.findUnique({ where: { id: qId } });
     if (!question) {
-      return res.status(404).json({ message: "Question not found" });
+      throw new NotFoundError("Question not found");
     }
 
     // check if correct
     const isCorrect = question.answer.trim().toLowerCase() === submittedAnswer.trim().toLowerCase();
 
-    // reate attempt record
+    // create attempt record
     const attempt = await prisma.attempt.create({
       data: {
         questionId: qId,
@@ -202,29 +211,23 @@ router.post("/:qId/play", async (req, res) => {
       createdAt: attempt.createdAt
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    next(error);
   }
 });
 
 // POST /api/questions
 // create a new question in the database
-router.post("/", upload.single("image"), async (req, res) => {
+router.post("/", upload.single("image"), async (req, res, next) => {
   try {
-    const { question, answer } = req.body;
+    // validating with Zod
+    const data = QuestionInput.parse(req.body); 
     const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
-
-    // check if both fields exist
-    if (!question || !answer) {
-      return res.status(400).json({
-        message: "Both question and answer are required"
-      });
-    }
 
     // create new question
     const newQuestion = await prisma.question.create({
       data: {
-        question,
-        answer,
+        question: data.question,
+        answer: data.answer,
         imageUrl,
         userId: req.user.userId // get user id from token 
       }
@@ -232,24 +235,21 @@ router.post("/", upload.single("image"), async (req, res) => {
 
     res.status(201).json(newQuestion);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    next(error);
   }
 });
 
 // PUT /api/questions/:qId
 // edit an existing question in the database
 // isOwner checks whether you are the creator
-router.put("/:qId", isOwner, upload.single("image"), async (req, res) => {
+router.put("/:qId", isOwner, upload.single("image"), async (req, res, next) => {
   try {
     const qId = Number(req.params.qId);
-    const { question, answer } = req.body;
+    
+    // validating with Zod
+    const parsedBody = QuestionInput.parse(req.body);
 
-    // check if the new data is given
-    if (!question || !answer) {
-      return res.status(400).json({ message: "Both question and answer are required" });
-    }
-
-    const data = { question, answer };
+    const data = { question: parsedBody.question, answer: parsedBody.answer };
     if (req.file) {
       data.imageUrl = `/uploads/${req.file.filename}`;
     }
@@ -264,16 +264,17 @@ router.put("/:qId", isOwner, upload.single("image"), async (req, res) => {
   } catch (error) {
     // error if question is not found
     if (error.code === 'P2025') {
-      return res.status(404).json({ message: "Question not found" });
+      next(new NotFoundError("Question not found"));
+    } else {
+      next(error);
     }
-    res.status(500).json({ error: error.message });
   }
 });
 
 // DELETE /api/questions/:qId
 // delete a question from the database
 // isOwner checks whether you are the creator
-router.delete("/:qId", isOwner, async (req, res) => {
+router.delete("/:qId", isOwner, async (req, res, next) => {
   try {
     const qId = Number(req.params.qId);
 
@@ -289,9 +290,10 @@ router.delete("/:qId", isOwner, async (req, res) => {
   } catch (error) {
     // handle case where question is not found
     if (error.code === 'P2025') {
-      return res.status(404).json({ message: "Question not found" });
+      next(new NotFoundError("Question not found"));
+    } else {
+      next(error);
     }
-    res.status(500).json({ error: error.message });
   }
 });
 
@@ -313,9 +315,10 @@ function formatQuestion(question) {
 // multer error handling middleware 
 router.use((err, req, res, next) => {
   if (err instanceof multer.MulterError || err?.message === "Only image files are allowed") {
-    return res.status(400).json({ msg: err.message });
+    next(new ValidationError(err.message));
+  } else {
+    next(err); // pass through to global handler
   }
-  next(err);
 });
 
 module.exports = router;
