@@ -4,6 +4,7 @@
   "description": "WOHI 2 project",
   "main": "src/index.js",
   "scripts": {
+    "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
